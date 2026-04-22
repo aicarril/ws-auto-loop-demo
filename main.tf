@@ -22,7 +22,7 @@ variable "project_name" {
 
 data "aws_caller_identity" "current" {}
 
-# --- S3 Static Website ---
+# --- S3 Bucket ---
 
 resource "aws_s3_bucket" "website" {
   bucket = "${var.project_name}-${data.aws_caller_identity.current.account_id}"
@@ -35,6 +35,8 @@ resource "aws_s3_bucket_public_access_block" "website" {
   ignore_public_acls      = true
   restrict_public_buckets = true
 }
+
+# --- Upload static files to S3 (learning: never skip this) ---
 
 resource "aws_s3_object" "index" {
   bucket       = aws_s3_bucket.website.id
@@ -52,7 +54,7 @@ resource "aws_s3_object" "error" {
   etag         = filemd5("${path.module}/website/error.html")
 }
 
-# --- CloudFront OAC + Distribution ---
+# --- CloudFront OAC ---
 
 resource "aws_cloudfront_origin_access_control" "website" {
   name                              = "${var.project_name}-oac"
@@ -60,6 +62,8 @@ resource "aws_cloudfront_origin_access_control" "website" {
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
 }
+
+# --- CloudFront Distribution ---
 
 resource "aws_cloudfront_distribution" "website" {
   enabled             = true
@@ -85,7 +89,6 @@ resource "aws_cloudfront_distribution" "website" {
     }
   }
 
-  # Lambda API origin
   origin {
     domain_name = replace(aws_apigatewayv2_api.lambda_api.api_endpoint, "https://", "")
     origin_id   = "lambda-api"
@@ -134,36 +137,28 @@ resource "aws_cloudfront_distribution" "website" {
   }
 }
 
-# --- S3 Bucket Policy for CloudFront OAC ---
+# --- S3 Bucket Policy for CloudFront OAC (learning: always include this) ---
 
 resource "aws_s3_bucket_policy" "website" {
   bucket = aws_s3_bucket.website.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AllowCloudFrontOAC"
-        Effect    = "Allow"
-        Principal = { Service = "cloudfront.amazonaws.com" }
-        Action    = "s3:GetObject"
-        Resource  = "${aws_s3_bucket.website.arn}/*"
-        Condition = {
-          StringEquals = {
-            "AWS:SourceArn" = aws_cloudfront_distribution.website.arn
-          }
+    Statement = [{
+      Sid       = "AllowCloudFrontOAC"
+      Effect    = "Allow"
+      Principal = { Service = "cloudfront.amazonaws.com" }
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.website.arn}/*"
+      Condition = {
+        StringEquals = {
+          "AWS:SourceArn" = aws_cloudfront_distribution.website.arn
         }
       }
-    ]
+    }]
   })
 }
 
-# --- Lambda Function ---
-
-data "archive_file" "lambda" {
-  type        = "zip"
-  source_file = "${path.module}/lambda/index.mjs"
-  output_path = "${path.module}/lambda/function.zip"
-}
+# --- Lambda IAM Role ---
 
 resource "aws_iam_role" "lambda" {
   name = "${var.project_name}-lambda-role"
@@ -180,6 +175,14 @@ resource "aws_iam_role" "lambda" {
 resource "aws_iam_role_policy_attachment" "lambda_basic" {
   role       = aws_iam_role.lambda.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# --- Lambda Function ---
+
+data "archive_file" "lambda" {
+  type        = "zip"
+  source_file = "${path.module}/lambda/index.mjs"
+  output_path = "${path.module}/lambda/function.zip"
 }
 
 resource "aws_lambda_function" "api" {
