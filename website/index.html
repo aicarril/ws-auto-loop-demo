@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>ws-auto-loop-demo</title></head>
+<body>
+  <h1>Hello from S3 + CloudFront</h1>
+  <p id="api-response">Loading...</p>
+  <script>
+    fetch('/api/hello')
+      .then(r => r.json())
+      .then(d => document.getElementById('api-response').textContent = d.message)
+      .catch(() => document.getElementById('api-response').textContent = 'API unavailable');
+  </script>
+</body>
+</html>
